@@ -1,34 +1,77 @@
 from collections import UserDict
+import datetime
 import csv
 import os
 import re
+
 
 class Field:
     def __init__(self, value=None):
         self.value = value
 
+
 class Name(Field):
     pass
+
+
+class Birthday(Field):
+    pass
+
 
 class Phone(Field):
     pass
 
+
 class Record:
-    def __init__(self, name):
+    def __init__(self, name, birthday=None, phones=None):
         self.name = Name(name)
+        self.birthday = Birthday(birthday) if birthday else None
         self.phones = []
+        if phones:
+            for phone in phones:
+                self.add_phone(phone)
+
+    def add_name(self, name):
+        self.name = Name(name)
+
+    def show_name(self):
+        return self.name.value
+
+    def edit_name(self, new_name):
+        self.name.value = new_name
+
+    def add_birthday(self, birthday):
+        self.birthday = Birthday(birthday)
+
+    def show_birthday(self):
+        if self.birthday:
+            return self.birthday.value
+        return None
+
+    def edit_birthday(self, new_birthday):
+        if not self.birthday:
+            self.birthday = Birthday(new_birthday)
+        else:
+            self.birthday.value = new_birthday
+
+    def del_birthday(self):
+        self.birthday = None
 
     def add_phone(self, phone):
         self.phones.append(Phone(phone))
 
-    def delete_phone(self, phone):
-        self.phones = [p for p in self.phones if p.value != phone]
+    def show_phones(self):
+        return [phone.value for phone in self.phones]
 
     def edit_phone(self, old_phone, new_phone):
         for phone in self.phones:
             if phone.value == old_phone:
                 phone.value = new_phone
                 break
+
+    def delete_phone(self, phone):
+        self.phones = [p for p in self.phones if p.value != phone]
+
 
 class AddressBook(UserDict):
     def add_record(self, record):
@@ -42,256 +85,295 @@ class AddressBook(UserDict):
         if not self.data:
             print("[-] No records found in the address book.")
         else:
-            for name, record in self.items():
-                print('#' + '-' * 30)
-                print(f'Name:   {name}')
-                phones_str = "; ".join([f"[{i + 1}] {phone.value}" for i, phone in enumerate(record.phones)])
-                print(f'Phones: {phones_str}')
+            for i, (name, record) in enumerate(self.items(), start=1):
+                print(f'{i}. {name}, ', end='')
+                if record.birthday:
+                    print(f'{record.birthday.value}, ', end='')
+                print('Phones: ', end='')
+                phones_str = "; ".join(
+                    [f"[{i + 1}] {phone.value}" for i, phone in enumerate(record.phones)])
+                print(phones_str)
 
-    def search_record(self):
-        pass
+    def search_record(self, query):
+        found_records = []
+        for name, record in self.data.items():
+            if query.lower() in name.lower():
+                found_records.append(name)
+            for phone in record.phones:
+                if query == phone.value:
+                    found_records.append(name)
+        return found_records
 
     def save_to_csv(self, filename):
         with open(filename, 'w', newline='') as csvfile:
-            fieldnames = ['Name', 'Phone']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
+            fieldnames = ['Name', 'Birthday', 'Phones']
+            writer = csv.DictWriter(
+                csvfile, fieldnames=fieldnames, delimiter=';')
             writer.writeheader()
             for record in self.data.values():
                 phones_list = [phone.value for phone in record.phones]
-                writer.writerow({'Name': record.name.value, 'Phone': phones_list})
+                writer.writerow(
+                    {'Name': record.name.value, 'Birthday': record.birthday.value if record.birthday else "", 'Phones': phones_list})
 
     def load_from_csv(self, filename):
         with open(filename, newline='') as csvfile:
             reader = csv.DictReader(csvfile, delimiter=';')
             for row in reader:
                 name = row['Name']
-                phones_str = row['Phone']
+                birthday = row['Birthday']
+                phones_str = row['Phones']
                 phones_list = eval(phones_str)
                 record = Record(name)
+                if birthday:
+                    record.birthday = Birthday(birthday)
                 for phone in phones_list:
                     record.add_phone(phone)
                 self.add_record(record)
 
-class Bot:
-    def __init__(self, address_book):
-        self.address_book = address_book
-        self.contact_data = self.address_book.data
 
-    def handle_hello(self, *args):
-        print("[+] Hi, I am Cortana and I am here to help! A touch of sign in here and a WiFi there... Just kidding! I am Based Assistant :)\nType in 'help' if you feel lost or press 'CTRL+C' to exit. Enough intro let's dig in...")
+class Bot:
+    exit_commands = ["q", "quit", "close", "exit"]
+
+    def __init__(self):
+        self.address_book = AddressBook()
+        self.address_book.load_from_csv('contacts.csv')
+
+        self.commands = {
+            'help': self.handle_help,
+            'hello': self.handle_hello,
+            'show all': self.handle_show_all,
+            'show phones': self.handle_show_phones,
+            'show birthday': self.handle_show_bday,
+            'days to birthday': self.handle_d2b,
+            'add': self.handle_add,
+            'change': self.handle_change,
+            'delete': self.handle_delete,
+            'search': self.handle_search,
+        }
+
+    def input_error(func):
+        def wrap(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except (KeyError, ValueError, IndexError):
+                return "[-] Input Error. Use 'help' for assistance."
+            except Exception as e:
+                return "[-] Exception: " + str(e)
+        return wrap
+
+    def parse_input(self, input_string, commands):
+        input_string_lower = input_string.lower()
+
+        command = None
+        for key in commands:
+            if input_string_lower.startswith(key.lower()):
+                command = key
+                break
+
+        if command is None:
+            return None, None, None, None
+
+        parsed_name = None
+        parsed_birthday = None
+        parsed_phones = []
+
+        rest_of_string = input_string[len(command):].strip()
+
+        arguments = re.findall(r'\".*?\"|\'.*?\'|\S+', rest_of_string)
+        arguments = [arg.strip('"\'') if arg[0]
+                     in '\'"' else arg for arg in arguments]
+
+        for i, arg in enumerate(arguments):
+            if re.match(r'^[a-zA-Z\- ]+$', arg):
+                parsed_name = arg
+            elif re.match(r'^\d{4}/\d{2}/\d{2}$', arg):
+                parsed_birthday = arg
+            elif re.match(r'^\d{11}$', arg):
+                parsed_phones.append(arg)
+
+        return command, parsed_name, parsed_birthday, parsed_phones
 
     def handle_help(self, *args):
-        print("[+] Supported Commands:"
-              "\n0 or help      " "Show help message."
-              "\n1 or add       " "Add new record."
-              "\n2 or delete    " "Delete record."
-              "\n3 or change    " "Change existing record."
-              "\n4 or add phone " "Add extra phone."
-              "\n5 or show all  " "Show all records."
-              "\n6 or q         " "Exit."
-              "\n6 or close     " "Exit."
-              "\n6 or exit      " "Exit."
-              "\n6 or quit      " "Exit."
-              "\nphone          " "Show contact phone (ex.: 'phone John')."
-              "\nhello          " "Print a greeting.")
+        print('[+] available commands: ')
+        for key in self.commands:
+            print(key)
 
-    def handle_add(self):
-        while True:
-            name = input("Enter a new name: ")
-            if not name:
-                print("[-] Error: Name cannot be empty. Please try again.")
-            elif name in self.address_book.data:
-                print(f"[-] Error: '{name}' already exists in the address book.")
-            else:
-                break
-        record = Record(name)
-        phone = input("Enter a new phone: ")
-        record.add_phone(phone)
-        self.address_book.add_record(record)
-        print("[+] Record added successfully!")
+    def handle_hello(self, *args):
+        print('[+] Hi there!')
 
-    def handle_delete(self):
-        name = input("Enter a name to delete: ")
-        self.address_book.delete_record(name)
-        print(f"[+] '{name}' record deleted successfully!")
-
-    def handle_change(self):
-        name = input("Enter a name to edit: ")
-        record = self.address_book.data.get(name)
-        if not record:
-            print(f"[-] '{name}' record not found.")
-            return
-
-        print(f"\nSelect a field to edit for '{name}':")
-        print("1. Name")
-        print("2. Phone")
-        choice = input("Chose a field to edit (1/2): ")
-
-        if choice == '1':
-            new_name = input("Enter a new name: ")
-            if not new_name:
-                print("[-] Error: Name cannot be empty. Please try again.")
-            else:
-                self.address_book.delete_record(name)
-                record.name.value = new_name
-                self.address_book.add_record(record)
-                print("[+] Name changed.")
-        elif choice == '2':
-            if len(record.phones) == 1:
-                new_phone = input("Enter a new phone number: ")
-                if new_phone in [phone.value for phone in record.phones]:
-                    print("[-] This phone number already exists for this contact.")
-                else:
-                    record.phones[0].value = new_phone
-                    print("[+] Phone edited successfully!")
-            elif len(record.phones) > 1:
-                print(f"'{name}' phones:")
-                for index, phone in enumerate(record.phones, 1):
-                    print(f"{index}. {phone.value}")
-                phone_index = input("Enter the index of the phone number to edit: ")
-                try:
-                    phone_index = int(phone_index)
-                    if 1 <= phone_index <= len(record.phones):
-                        new_phone = input("Enter the new phone number: ")
-                        if new_phone in [phone.value for phone in record.phones]:
-                            print("[-] This phone number already exists for this contact.")
-                        else:
-                            record.edit_phone(record.phones[phone_index - 1].value, new_phone)
-                            print("[+] Phone edited successfully!")
-                    else:
-                        print("[-] Invalid input. Please try again.")
-                except ValueError:
-                    print("[-] Invalid input. Please enter a valid number.")
-            else:
-                print(f"[-] No phone numbers found for '{name}'.")
-        else:
-            print("[-] Invalid input. Please try again.")
-
-    def handle_add_phone(self):
-        name = input("Enter a name: ")
-        record = self.address_book.data.get(name)
-        if not record:
-            print(f"[-] '{name}' record not found.")
-            return
-        while True:
-            phone = input("Enter a phone number (type 'done' to finish): ")
-            if phone.lower() == 'done':
-                break
-            if phone in [p.value for p in record.phones]:
-                print("[-] This phone number already exists for this contact.")
-            else:
-                record.add_phone(phone)
-        print("[+] Phone number(s) added.")
-
-    def handle_delete_phone(self):
-        name = input("Enter a name: ")
-        record = self.address_book.data.get(name)
-        if not record:
-            print(f"[-] '{name}' record not found.")
-            return
-        if len(record.phones) == 1:
-            phone = record.phones[0].value
-            record.delete_phone(phone)
-            print("[+] Phone number deleted.")
-        elif len(record.phones) > 1:
-            print(f"'{name}' phones:")
-            for index, phone in enumerate(record.phones, 1):
-                print(f"{index}. {phone.value}")
-            phone_index = input("Enter the index of the phone number to delete: ")
-            try:
-                phone_index = int(phone_index)
-                if 1 <= phone_index <= len(record.phones):
-                    phone = record.phones[phone_index - 1].value
-                    record.delete_phone(phone)
-                    print("[+] Phone number deleted.")
-                else:
-                    print("[-] Invalid input. Please try again.")
-            except ValueError:
-                print("[-] Invalid input. Please enter a valid number.")
-        else:
-            print(f"[-] No phone numbers found for '{name}'.")
-
-    def handle_show_all(self):
+    def handle_show_all(self, *args):
         self.address_book.show_all_records()
 
-    def handle_phone(self, *args):
-        name = input("Enter a name to search: ")
-        record = self.address_book.data.get(name)
-        if not record:
-            print(f"[-] '{name}' record not found.")
-            return
-        print(f"'{name}' phones:")
-        index = 1
-        for phone in record.phones:
-            print(f"{index}. {phone.value}")
-            index += 1
-
-    def run(self):
-        os.system('cls' if os.name == 'nt' else 'clear')
-        print("[+] Hi, I am Cortana and I am here to help! A touch of sign in here and a WiFi there... Just kidding! I am Based Assistant :)\nType in 'help' if you feel lost or press 'CTRL+C' to exit. Enough intro let's dig in...")
-        while True:
-            print('\n#' + '-' * 30)
-            print("What would you like to do?")
-            print("0. Help")
-            print("1. Add a record")
-            print("2. Delete a record")
-            print("3. Edit a record")
-            print("4. Add phone(s)")
-            print("5. Delete phone")
-            print("6. Show all records")
-            print("7. Exit")
-            choice = input("Enter your choice (1/2/3/4/5/6/7): ").lower()
-
-            if choice in ('0', 'help'):
-                os.system('cls' if os.name == 'nt' else 'clear')
-                self.handle_help()
-            elif choice in ('1', 'add'):
-                os.system('cls' if os.name == 'nt' else 'clear')
-                self.handle_add()
-            elif choice in ('2', 'delete'):
-                os.system('cls' if os.name == 'nt' else 'clear')
-                self.handle_delete()
-            elif choice in ('3', 'change'):
-                os.system('cls' if os.name == 'nt' else 'clear')
-                self.handle_change()
-            elif choice in ('4', 'add phone'):
-                os.system('cls' if os.name == 'nt' else 'clear')
-                self.handle_add_phone()
-            elif choice in ('5', 'delete phone'):
-                os.system('cls' if os.name == 'nt' else 'clear')
-                self.handle_delete_phone()
-            elif choice in ('6', 'show all'):
-                os.system('cls' if os.name == 'nt' else 'clear')
-                self.handle_show_all()
-            elif choice in ('7', 'exit', 'close', 'quit', 'q'):
-                os.system('cls' if os.name == 'nt' else 'clear')
-                print("[+] See you later, Pal.")
-                break
-            elif choice == 'hello':
-                os.system('cls' if os.name == 'nt' else 'clear')
-                self.handle_hello()
-            elif choice == 'phone':
-                os.system('cls' if os.name == 'nt' else 'clear')
-                self.handle_phone()
+    def handle_show_phones(self, *args):
+        if args:
+            contactname = args[0]
+            if contactname in self.address_book.data:
+                record = self.address_book.data[contactname]
+                phones_str = ", ".join(
+                    [phone.value for phone in record.phones])
+                print(f"[+] Phone numbers for {contactname}: {phones_str}")
             else:
-                os.system('cls' if os.name == 'nt' else 'clear')
-                print("[-] Invalid choice. Try again.")
+                print("[-] Record not found.")
+        else:
+            print("[-] Missing contact name.")
+
+    def handle_show_bday(self, *args):
+        if args:
+            contactname = args[0]
+            if contactname in self.address_book.data:
+                record = self.address_book.data[contactname]
+                print(
+                    f"[+] {contactname}'s birthday is: {record.show_birthday()}")
+            else:
+                print("[-] Record not found.")
+        else:
+            print("[-] Missing contact name.")
+
+    def handle_d2b(self, *args):
+        contactname, = args
+        if contactname in self.address_book.data:
+            record = self.address_book.data[contactname]
+            birthday = record.birthday.value
+            if not birthday:
+                return "[-] No birthday recorded for this contact."
+
+            try:
+                parsed_birthday = datetime.datetime.strptime(
+                    birthday, '%Y/%m/%d').date()
+            except ValueError:
+                print(
+                    "[-] Incorrect date format in the record. Use 'YYYY/MM/DD' format.")
+
+            today = datetime.date.today()
+            next_birthday = datetime.date(
+                today.year, parsed_birthday.month, parsed_birthday.day)
+
+            if next_birthday < today:
+                next_birthday = datetime.date(
+                    today.year + 1, parsed_birthday.month, parsed_birthday.day)
+
+            days_to_birthday = (next_birthday - today).days
+            if days_to_birthday == 0:
+                print("[+] Today is the contact's birthday!")
+            elif days_to_birthday == 1:
+                print("[+] Tomorrow is the contact's birthday!")
+            else:
+                print(
+                    f"[+] {contactname}'s birthday is in {days_to_birthday} days.")
+        else:
+            print("[-] Record not found.")
+
+    def handle_add(self, name, birthday, phones):
+        if not name:
+            return "[-] Missing required 'name' field."
+
+        if birthday:
+            try:
+                datetime.datetime.strptime(birthday, '%Y/%m/%d')
+            except ValueError:
+                return "[-] Incorrect date format for 'birthday'. Use 'YYYY/MM/DD' format."
+
+        if phones:
+            for phone in phones:
+                if not re.match(r'^\d{11}$', phone):
+                    return "[-] Phone numbers must be 11-digit numerical strings."
+
+        if name in self.address_book.data:
+            return "[-] Name already exists."
+
+        record = Record(name, birthday, phones)
+        self.address_book.add_record(record)
+        return f"[+] Contact '{name}' added successfully!"
+
+    def handle_change(self, name, birthday, phones):
+        if not name:
+            return "[-] Missing required 'name' field."
+
+        existing_record = self.address_book.data.get(name)
+
+        if existing_record:
+            if birthday:
+                try:
+                    datetime.datetime.strptime(birthday, '%Y/%m/%d')
+                    existing_record.birthday = Birthday(birthday)
+                except ValueError:
+                    return "[-] Incorrect date format for 'birthday'. Use 'YYYY/MM/DD' format."
+
+            if phones:
+                for phone in phones:
+                    if not re.match(r'^\d{11}$', phone):
+                        return "[-] Phone numbers must be 11-digit numerical strings."
+                existing_record.phones = [Phone(phone) for phone in phones]
+
+            return f"[+] Contact '{name}' changed successfully!"
+        else:
+            return "[-] Record not found."
+
+    def handle_delete(self, *args):
+        if args:
+            contactname = args[0]
+            if contactname in self.address_book.data:
+                self.address_book.delete_record(contactname)
+                print(f"[+] Deleted record for {contactname}.")
+            else:
+                print("[-] Record not found.")
+        else:
+            print("[-] Missing contact name. Usage: delete <name>")
+
+    def handle_search(self, *args):
+        if args:
+            query = args[0]
+            found_records = self.address_book.search_record(query)
+            if found_records:
+                for name in found_records:
+                    record = self.address_book.data[name]
+                    print(f'{name}, ', end='')
+                    if record.birthday:
+                        print(f'{record.birthday.value}, ', end='')
+                    print('Phones: ', end='')
+                    phones_str = "; ".join(
+                        [f"[{i + 1}] {phone.value}" for i, phone in enumerate(record.phones)])
+                    print(phones_str)
+            else:
+                print("[-] No matching records found.")
+        else:
+            print("[-] Missing search query. Usage: search <query>")
+
 
 def main():
     if not os.path.exists('contacts.csv'):
         with open('contacts.csv', 'w', newline=''):
             pass
+    bot = Bot()
     address_book = AddressBook()
-    address_book.load_from_csv('contacts.csv')
-    bot = Bot(address_book)
-    try:
-        bot.run()
-    except KeyboardInterrupt:
+    bot.address_book.load_from_csv('contacts.csv')
+
+    while True:
+        try:
+            contact_input = input("Enter your command:")
+        except KeyboardInterrupt:
+            break
+
+        if contact_input.lower() in bot.exit_commands:
+            break
+
         os.system('cls' if os.name == 'nt' else 'clear')
-        pass
-    finally:
-        address_book.save_to_csv('contacts.csv')
+        command, name, birthday, phones = bot.parse_input(
+            contact_input, bot.commands.keys())
+        handler = bot.commands.get(command)
+        print(
+            f'[i] Debug: cmd: {command}; ars: {name}, {birthday}, {phones}')
+
+        if handler:
+            result = handler(name, birthday, phones)
+            if result:
+                print(result)
+        else:
+            print("[-] Command not recognized. Try 'help'.")
+
+    bot.address_book.save_to_csv('contacts.csv')
+    print("\n[+] Bye!")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
