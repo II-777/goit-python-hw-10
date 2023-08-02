@@ -1,5 +1,5 @@
 from collections import UserDict
-import datetime
+from datetime import datetime
 import csv
 import os
 import re
@@ -94,15 +94,8 @@ class AddressBook(UserDict):
                     [f"[{i + 1}] {phone.value}" for i, phone in enumerate(record.phones)])
                 print(phones_str)
 
-    def search_record(self, query):
-        found_records = []
-        for name, record in self.data.items():
-            if query.lower() in name.lower():
-                found_records.append(name)
-            for phone in record.phones:
-                if query == phone.value:
-                    found_records.append(name)
-        return found_records
+    def search_record(self):
+        pass
 
     def save_to_csv(self, filename):
         with open(filename, 'w', newline='') as csvfile:
@@ -144,7 +137,7 @@ class Bot:
             'show all': self.handle_show_all,
             'show phones': self.handle_show_phones,
             'show birthday': self.handle_show_bday,
-            'days to birthday': self.handle_d2b,
+            'd2b': self.handle_d2b,
             'add': self.handle_add,
             'change': self.handle_change,
             'delete': self.handle_delete,
@@ -307,24 +300,26 @@ class Bot:
         else:
             print("[-] Missing contact name. Usage: delete <name>")
 
-    def handle_search(self, *args):
-        if args:
-            query = args[0]
-            found_records = self.address_book.search_record(query)
-            if found_records:
-                for name in found_records:
-                    record = self.address_book.data[name]
-                    print(f'{name}, ', end='')
-                    if record.birthday:
-                        print(f'{record.birthday.value}, ', end='')
-                    print('Phones: ', end='')
-                    phones_str = "; ".join(
-                        [f"[{i + 1}] {phone.value}" for i, phone in enumerate(record.phones)])
-                    print(phones_str)
+    def handle_search(self, name, phones):
+        if name:
+            record = self.address_book.data.get(name)
+            if record:
+                self.address_book.show_all_records(name)
             else:
-                print("[-] No matching records found.")
+                return "[-] Record not found."
+        elif phones:
+            found_record = None
+            for record in self.address_book.data.values():
+                if any(phone == phone_obj.value for phone_obj in record.phones):
+                    found_record = record
+                    break
+
+            if found_record:
+                self.address_book.show_all_records(found_record.name.value)
+            else:
+                return "[-] Record not found."
         else:
-            print("[-] Missing search query. Usage: search <query>")
+            return "[-] Missing search query. Usage: search <query>"
 
 
 def main():
@@ -364,3 +359,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
